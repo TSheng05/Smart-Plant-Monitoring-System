@@ -20,7 +20,7 @@ This is my Year 2 IoT mini project using ESP32, DHT11 sensor, LDR, LCD display, 
 - (Optional) Web dashboard for remote viewing
 
 ## 📁 File Structure
-- `code/plant_monitoring.ino` : Main Arduino code
+- `System Code/plant_monitoring.ino` : Main Arduino code
 - `images/` : System diagram and prototype photos
 
 ## 👨‍💻 Author
