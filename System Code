@@ -1,0 +1,116 @@
+#include <WiFi.h>
+#include <DHT.h>
+#include <ThingSpeak.h>
+#include <LiquidCrystal_I2C.h>
+#include <ESP32Servo.h>
+#include <WebServer.h>
+#include "time.h"
+
+#define SERVO_PIN 14
+
+const char* ssid = "-";
+const char* password = "-";
+const char* ntpServer = "pool.ntp.org";
+const long gmtOffset_sec = 8 * 3600;
+const int daylightOffset_sec = 0;
+
+WebServer server(80);
+Servo myServo;
+
+String lastButtonPressedTime = "Never";
+bool servoActive = false;
+unsigned long servoStartTime = 0;
+const unsigned long servoDuration = 1000;
+
+void setup() {
+  Serial.begin(115200);
+  myServo.attach(SERVO_PIN);
+
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi connected");
+
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+
+  server.on("/", handleRoot);
+  server.on("/servo", handleServo);
+  server.begin();
+  Serial.println("HTTP server started");
+}
+
+void loop() {
+  server.handleClient();
+  Serial.println(WiFi.localIP());
+
+  if (servoActive && millis() - servoStartTime >= servoDuration) {
+    myServo.write(0);
+    servoActive = false;
+  }
+}
+
+String getFormattedTime() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) return "Time Error";
+  char buffer[30];
+  strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &timeinfo);
+  return String(buffer);
+}
+
+void handleRoot() {
+  String html = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ESP32 Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>
+    async function fetchData() {
+      try {
+        const res = await fetch('https://api.thingspeak.com/channels/2970651/feeds.json?results=1');
+        const data = await res.json();
+        const feed = data.feeds[0];
+        document.getElementById('Tem').textContent = feed.field1 + " °C";
+        document.getElementById('Hum').textContent = feed.field2 + " %";
+        document.getElementById('LDR').textContent = feed.field3 + " %";
+      } catch (e) {
+        console.log("Error loading ThingSpeak data:", e);
+      }
+    }
+    setInterval(fetchData, 15000); // 更新频率：15秒
+    window.onload = fetchData;
+  </script>
+</head>
+<body>
+  <h2>🕒 Current Time: %TIME%</h2>
+  <form action="/servo" method="GET">
+    <button type="submit">Rotate Servo</button>
+  </form>
+  <p><strong>Last Button Press:</strong> %LAST_PRESS%</p>
+
+  <h3>🌡️ Environment Data from ThingSpeak:</h3>
+  <ul>
+    <li>Temperature: <span id="temp">Loading...</span></li>
+    <li>Humidity: <span id="hum">Loading...</span></li>
+    <li>Light: <span id="light">Loading...</span></li>
+  </ul>
+</body>
+</html>
+)rawliteral";
+
+  html.replace("%TIME%", getFormattedTime());
+  html.replace("%LAST_PRESS%", lastButtonPressedTime);
+  server.send(200, "text/html", html);
+}
+
+void handleServo() {
+  lastButtonPressedTime = getFormattedTime();
+  myServo.write(90);
+  servoStartTime = millis();
+  servoActive = true;
+  server.sendHeader("Location", "/");
+  server.send(303);  // Redirect
+}
